@@ -47,6 +47,7 @@ class VkCtx
     friend class VkCtxScope;
 
     enum { QueryCount = 64 * 1024 };
+    enum { CalibrationProbeTries = 8 };
 
 public:
     VkCtx( VkPhysicalDevice physdev, VkDevice device, VkQueue queue, VkCommandBuffer cmdbuf, PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT _vkGetPhysicalDeviceCalibrateableTimeDomainsEXT, PFN_vkGetCalibratedTimestampsEXT _vkGetCalibratedTimestampsEXT )
@@ -296,20 +297,27 @@ private:
             { VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, VK_TIME_DOMAIN_DEVICE_EXT },
             { VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_EXT, nullptr, m_timeDomain },
         };
-        uint64_t ts[2];
+        uint64_t ts[2], bestTs[2];
         uint64_t deviation;
+        uint64_t minDeviation = UINT64_MAX;
+        size_t tries = CalibrationProbeTries;
         do
         {
             m_vkGetCalibratedTimestampsEXT( device, 2, spec, ts, &deviation );
+            if (deviation <= minDeviation) {
+                bestTs[0] = ts[0];
+                bestTs[1] = ts[1];
+                minDeviation = deviation;
+            }
         }
-        while( deviation > m_deviation );
+        while( deviation > m_deviation && --tries > 0);
 
 #if defined _WIN32
-        tGpu = ts[0];
-        tCpu = ts[1] * m_qpcToNs;
+        tGpu = bestTs[0];
+        tCpu = bestTs[1] * m_qpcToNs;
 #elif defined __linux__ && defined CLOCK_MONOTONIC_RAW
-        tGpu = ts[0];
-        tCpu = ts[1];
+        tGpu = bestTs[0];
+        tCpu = bestTs[1];
 #else
         assert( false );
 #endif
